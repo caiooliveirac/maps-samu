@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   # ──────────────────────────────────────────
   # NGINX — Reverse Proxy & Static Files
@@ -18,6 +16,25 @@ services:
       - samu-net
 
   # ──────────────────────────────────────────
+  # OSRM — Routing Engine (OpenStreetMap)
+  # ──────────────────────────────────────────
+  osrm:
+    build:
+      context: ./osrm
+      dockerfile: Dockerfile
+    volumes:
+      - osrm-data:/data
+    healthcheck:
+      test: ["CMD", "/healthcheck.sh"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 300s
+    restart: unless-stopped
+    networks:
+      - samu-net
+
+  # ──────────────────────────────────────────
   # BACKEND — FastAPI
   # ──────────────────────────────────────────
   backend:
@@ -27,6 +44,8 @@ services:
     env_file: .env
     depends_on:
       db:
+        condition: service_healthy
+      osrm:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
@@ -60,6 +79,8 @@ services:
 
 volumes:
   pgdata:
+    driver: local
+  osrm-data:
     driver: local
 
 networks:

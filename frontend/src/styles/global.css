@@ -442,6 +442,108 @@ body {
   pointer-events: none;
 }
 
+.coord-mode-indicator {
+  background: rgba(234, 179, 8, 0.85);
+  color: #000;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+/* ── Coord capture ── */
+.btn-coord-mode {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--border-radius);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-coord-mode:hover {
+  border-color: var(--color-accent);
+  color: var(--text-primary);
+}
+
+.btn-coord-mode.active {
+  background: rgba(234, 179, 8, 0.15);
+  border-color: #eab308;
+  color: #eab308;
+  font-weight: 600;
+}
+
+.coord-capture-panel {
+  margin: 0 20px 12px;
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  background: var(--bg-card);
+}
+
+.coord-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+
+.coord-item:last-child {
+  border-bottom: none;
+}
+
+.coord-label {
+  color: var(--text-muted);
+  font-size: 10px;
+  margin-right: 4px;
+}
+
+.coord-values {
+  flex: 1;
+  user-select: all;
+}
+
+.btn-copy-coord {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px 8px;
+  font-size: 14px;
+  margin-left: 8px;
+  transition: all 0.2s;
+}
+
+.btn-copy-coord:hover {
+  border-color: var(--color-accent);
+  color: var(--text-primary);
+}
+
+.btn-copy-all {
+  width: 100%;
+  padding: 8px;
+  background: var(--bg-card-hover);
+  border: none;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-copy-all:hover {
+  background: var(--color-accent);
+  color: #fff;
+}
+
 /* ── Responsive ── */
 @media (max-width: 768px) {
   .app-layout {

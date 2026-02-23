@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     # Geocoding
     nominatim_url: str = "https://nominatim.openstreetmap.org"
 
+    # OSRM (routing engine)
+    osrm_url: str = "http://osrm:5000"
+
     # App
     log_level: str = "info"
     tz: str = "America/Bahia"

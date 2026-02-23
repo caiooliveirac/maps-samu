@@ -126,6 +126,9 @@ export default function App() {
   const [occurrencePos, setOccurrencePos] = useState(null);
   const [flyTarget, setFlyTarget] = useState(null);
   const [selectedBase, setSelectedBase] = useState(null);
+  const [coordMode, setCoordMode] = useState(false);
+  const [capturedCoords, setCapturedCoords] = useState([]);
+  const [copiedIndex, setCopiedIndex] = useState(null);
   const inputRef = useRef(null);
 
   // Load bases on mount
@@ -170,11 +173,27 @@ export default function App() {
   // Map click
   const handleMapClick = useCallback(
     (lat, lng) => {
+      if (coordMode) {
+        setCapturedCoords((prev) => [
+          { lat, lng, label: `Ponto ${prev.length + 1}` },
+          ...prev,
+        ]);
+        return;
+      }
       setOccurrencePos([lat, lng]);
       handleDispatch(lat, lng);
     },
-    [handleDispatch]
+    [handleDispatch, coordMode]
   );
+
+  // Copy coordinates to clipboard
+  const handleCopyCoord = useCallback((coord, index) => {
+    const text = `${coord.lat},${coord.lng}`;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedIndex(index);
+      setTimeout(() => setCopiedIndex(null), 2000);
+    });
+  }, []);
 
   // Address search
   const handleSearchSubmit = (e) => {
@@ -261,9 +280,15 @@ export default function App() {
           )}
         </MapContainer>
 
-        {!result && !loading && (
+        {!result && !loading && !coordMode && (
           <div className="map-click-indicator">
             Clique no mapa para localizar a ocorrência
+          </div>
+        )}
+
+        {coordMode && (
+          <div className="map-click-indicator coord-mode-indicator">
+            📌 MODO CAPTURA — Clique no mapa para capturar coordenadas
           </div>
         )}
       </div>
@@ -274,6 +299,61 @@ export default function App() {
           <h1>MAPS-SAMU</h1>
           <div className="subtitle">Despacho de Ambulâncias — Salvador, BA</div>
         </div>
+
+        {/* Coord capture toggle */}
+        <div style={{ padding: '0 20px 8px' }}>
+          <button
+            className={`btn-coord-mode ${coordMode ? 'active' : ''}`}
+            onClick={() => {
+              setCoordMode((prev) => !prev);
+              if (coordMode) setCapturedCoords([]);
+            }}
+          >
+            {coordMode ? '✕ Sair do modo captura' : '📌 Capturar Coordenadas'}
+          </button>
+        </div>
+
+        {/* Captured coordinates list */}
+        {coordMode && (
+          <div className="coord-capture-panel">
+            {capturedCoords.length === 0 && (
+              <div style={{ fontSize: 12, color: '#94a3b8', textAlign: 'center', padding: 12 }}>
+                Clique no mapa para capturar coordenadas.<br />
+                Cada clique adiciona um ponto aqui.
+              </div>
+            )}
+            {capturedCoords.map((coord, i) => (
+              <div key={i} className="coord-item">
+                <div className="coord-values">
+                  <span className="coord-label">Lat:</span> {coord.lat}
+                  <br />
+                  <span className="coord-label">Lng:</span> {coord.lng}
+                </div>
+                <button
+                  className="btn-copy-coord"
+                  onClick={() => handleCopyCoord(coord, i)}
+                  title="Copiar coordenadas"
+                >
+                  {copiedIndex === i ? '✓' : '📋'}
+                </button>
+              </div>
+            ))}
+            {capturedCoords.length > 0 && (
+              <button
+                className="btn-copy-all"
+                onClick={() => {
+                  const csv = 'Latitude,Longitude\n' +
+                    capturedCoords.map((c) => `${c.lat},${c.lng}`).join('\n');
+                  navigator.clipboard.writeText(csv);
+                  setCopiedIndex(-1);
+                  setTimeout(() => setCopiedIndex(null), 2000);
+                }}
+              >
+                {copiedIndex === -1 ? '✓ Copiado!' : '📋 Copiar tudo (CSV)'}
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Search */}
         <div className="search-section">

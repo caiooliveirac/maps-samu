@@ -33,6 +33,7 @@ from app.schemas.dispatch import (
 from app.services.distance import (
     find_nearest_zone, estimate_minutes,
 )
+from app.services.osrm import get_route as osrm_get_route
 from app.services.geocoding import geocode_address
 from app.services.time_period import get_current_time_period
 from app.config import get_settings
@@ -149,20 +150,41 @@ async def dispatch(
     else:
         fallback_used = True
 
-    # ── 7. Fallback: Haversine ───────────────────────────
+    # ── 7. Fallback: OSRM routing real → Haversine ─────
     if fallback_used or not ranked:
         logger.warning(
-            f"Usando fallback Haversine para ({lat}, {lng}), "
+            f"Usando fallback para ({lat}, {lng}), "
             f"zone_id={zone_id}, period={time_period_str}"
         )
         fallback_used = True
         ranked = []
+
+        # Multiplicadores por faixa horária (sobre tempo OSRM free-flow)
+        period_multipliers = {
+            "NORMAL": 1.0,
+            "MORNING_RUSH": 1.85,
+            "EVENING_RUSH": 1.85,
+            "NIGHT": 0.70,
+            "WEEKEND": 0.85,
+        }
+        multiplier = period_multipliers.get(time_period_str, 1.0)
+
         for base in bases:
-            minutes = estimate_minutes(
+            # Tentar OSRM primeiro
+            osrm_result = await osrm_get_route(
                 lat, lng,
                 base.latitude, base.longitude,
-                time_period_str,
             )
+            if osrm_result:
+                _, osrm_minutes = osrm_result
+                minutes = round(max(osrm_minutes * multiplier, 2.0), 1)
+            else:
+                # Fallback final: Haversine
+                minutes = estimate_minutes(
+                    lat, lng,
+                    base.latitude, base.longitude,
+                    time_period_str,
+                )
             ranked.append({"base": base, "minutes": minutes})
 
     # Ordenar por tempo
