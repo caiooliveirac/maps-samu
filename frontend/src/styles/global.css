@@ -321,6 +321,18 @@ body {
 .rank-2 .time-estimate { color: var(--color-rank-2); }
 .rank-3 .time-estimate { color: var(--color-rank-3); }
 
+.time-estimate.eta-fast {
+  color: #38bdf8;
+}
+
+.time-estimate.eta-medium {
+  color: #facc15;
+}
+
+.time-estimate.eta-slow {
+  color: #f87171;
+}
+
 .time-unit {
   font-size: 12px;
   font-weight: 400;

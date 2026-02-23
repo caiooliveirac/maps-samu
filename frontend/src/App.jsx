@@ -107,6 +107,12 @@ function FlyTo({ position }) {
 // ── Result Card ──
 function ResultCard({ base, isTop, onClick, occurrencePos }) {
   const rankClass = base.rank <= 3 ? `rank-${base.rank}` : '';
+  const etaClass =
+    base.estimated_minutes < 10
+      ? 'eta-fast'
+      : base.estimated_minutes <= 20
+        ? 'eta-medium'
+        : 'eta-slow';
   const distanceKm = occurrencePos
     ? haversineDistanceKm(occurrencePos[0], occurrencePos[1], base.latitude, base.longitude)
     : null;
@@ -127,7 +133,7 @@ function ResultCard({ base, isTop, onClick, occurrencePos }) {
           </div>
         </div>
         <div>
-          <div className="time-estimate">
+          <div className={`time-estimate ${etaClass}`}>
             {base.estimated_minutes.toFixed(0)}
             <span className="time-unit">min</span>
           </div>
@@ -248,8 +254,11 @@ export default function App() {
     setFlyTarget([base.latitude, base.longitude]);
   };
 
-  // Line from occurrence to top base
+  // Linha de rota: base selecionada no card (ou top 1 por padrão)
   const topBase = result?.bases_ranked?.[0];
+  const activeRouteBase =
+    (result?.bases_ranked || []).find((base) => base.base_id === selectedBase)
+    || topBase;
   const topThreeByBaseId = useMemo(() => {
     const map = {};
     (result?.bases_ranked || []).slice(0, 3).forEach((base) => {
@@ -266,8 +275,8 @@ export default function App() {
   };
 
   const routeLine =
-    occurrencePos && topBase
-      ? [occurrencePos, [topBase.latitude, topBase.longitude]]
+    occurrencePos && activeRouteBase
+      ? [occurrencePos, [activeRouteBase.latitude, activeRouteBase.longitude]]
       : null;
 
   const routingMode = result?.routing_mode || (result?.fallback_used ? 'FORMULA' : 'OSRM');
@@ -324,10 +333,10 @@ export default function App() {
             <Polyline
               positions={routeLine}
               pathOptions={{
-                color: '#22c55e',
-                weight: 3,
-                dashArray: '8 8',
-                opacity: 0.8,
+                color: '#22d3ee',
+                weight: 5,
+                dashArray: '10 10',
+                opacity: 0.9,
               }}
             />
           )}
