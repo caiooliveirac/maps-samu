@@ -9,7 +9,12 @@ import {
   useMap,
 } from 'react-leaflet';
 import L from 'leaflet';
-import { dispatchByCoords, dispatchByAddress, fetchBases } from './services/api';
+import {
+  dispatchByCoords,
+  dispatchByAddress,
+  fetchBases,
+  fetchRoutePath,
+} from './services/api';
 
 // ── Map center: Salvador ──
 const SALVADOR_CENTER = [-12.9714, -38.5124];
@@ -38,11 +43,40 @@ const createRankIcon = (fill, stroke, label, size = 30) =>
     iconAnchor: [size / 2, size / 2],
   });
 
+const createMedicalBaseIcon = (size = 24) =>
+  L.divIcon({
+    className: '',
+    html: `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="10" fill="#ef4444" opacity="0.95" stroke="#fff" stroke-width="2"/>
+      <rect x="10.6" y="7.4" width="2.8" height="9.2" rx="0.8" fill="#fff"/>
+      <rect x="7.4" y="10.6" width="9.2" height="2.8" rx="0.8" fill="#fff"/>
+    </svg>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+
+const etaBandFromMinutes = (minutes) => {
+  if (minutes <= 3) return 'eta-band-1';
+  if (minutes <= 6) return 'eta-band-2';
+  if (minutes <= 9) return 'eta-band-3';
+  if (minutes <= 12) return 'eta-band-4';
+  if (minutes <= 15) return 'eta-band-5';
+  if (minutes <= 18) return 'eta-band-6';
+  return 'eta-band-7';
+};
+
+const ETA_BAND_COLORS = {
+  'eta-band-1': '#38bdf8',
+  'eta-band-2': '#06b6d4',
+  'eta-band-3': '#22c55e',
+  'eta-band-4': '#eab308',
+  'eta-band-5': '#f59e0b',
+  'eta-band-6': '#f97316',
+  'eta-band-7': '#ef4444',
+};
+
 const ICONS = {
-  base: createIcon('#3b82f6', 24),
-  baseTop: createIcon('#22c55e', 32),
-  baseRank2: createRankIcon('#84cc16', '#bef264', '2', 28),
-  baseRank3: createRankIcon('#eab308', '#facc15', '3', 27),
+  base: createMedicalBaseIcon(24),
   occurrence: L.divIcon({
     className: '',
     html: `<svg width="36" height="36" viewBox="0 0 24 24" fill="none">
@@ -107,12 +141,7 @@ function FlyTo({ position }) {
 // ── Result Card ──
 function ResultCard({ base, isTop, onClick, occurrencePos }) {
   const rankClass = base.rank <= 3 ? `rank-${base.rank}` : '';
-  const etaClass =
-    base.estimated_minutes < 10
-      ? 'eta-fast'
-      : base.estimated_minutes <= 20
-        ? 'eta-medium'
-        : 'eta-slow';
+  const etaClass = etaBandFromMinutes(base.estimated_minutes);
   const distanceKm = occurrencePos
     ? haversineDistanceKm(occurrencePos[0], occurrencePos[1], base.latitude, base.longitude)
     : null;
@@ -171,6 +200,7 @@ export default function App() {
   const [occurrencePos, setOccurrencePos] = useState(null);
   const [flyTarget, setFlyTarget] = useState(null);
   const [selectedBase, setSelectedBase] = useState(null);
+  const [routeGeometry, setRouteGeometry] = useState(null);
   const [coordMode, setCoordMode] = useState(false);
   const [capturedCoords, setCapturedCoords] = useState([]);
   const [copiedIndex, setCopiedIndex] = useState(null);
@@ -190,6 +220,7 @@ export default function App() {
       setError(null);
       setResult(null);
       setSelectedBase(null);
+      setRouteGeometry(null);
 
       try {
         let data;
@@ -202,6 +233,7 @@ export default function App() {
         setResult(data);
         setOccurrencePos([data.occurrence_lat, data.occurrence_lng]);
         setFlyTarget([data.occurrence_lat, data.occurrence_lng]);
+        setSelectedBase(data?.bases_ranked?.[0]?.base_id || null);
       } catch (err) {
         setError({
           message: err.message || 'Erro desconhecido',
@@ -259,25 +291,58 @@ export default function App() {
   const activeRouteBase =
     (result?.bases_ranked || []).find((base) => base.base_id === selectedBase)
     || topBase;
-  const topThreeByBaseId = useMemo(() => {
+  const rankingByBaseId = useMemo(() => {
     const map = {};
-    (result?.bases_ranked || []).slice(0, 3).forEach((base) => {
-      map[base.base_id] = base.rank;
+    (result?.bases_ranked || []).forEach((base) => {
+      map[base.base_id] = {
+        rank: base.rank,
+        etaBand: etaBandFromMinutes(base.estimated_minutes),
+      };
     });
     return map;
   }, [result]);
 
-  const markerIconByRank = (rank) => {
-    if (rank === 1) return ICONS.baseTop;
-    if (rank === 2) return ICONS.baseRank2;
-    if (rank === 3) return ICONS.baseRank3;
-    return ICONS.base;
+  const markerIconsByBaseId = useMemo(() => {
+    const icons = {};
+    Object.entries(rankingByBaseId).forEach(([baseId, info]) => {
+      const fill = ETA_BAND_COLORS[info.etaBand] || '#ef4444';
+      const stroke = info.rank <= 3 ? '#f8fafc' : '#e2e8f0';
+      const size = info.rank === 1 ? 34 : info.rank <= 3 ? 31 : 28;
+      icons[baseId] = createRankIcon(fill, stroke, String(info.rank), size);
+    });
+    return icons;
+  }, [rankingByBaseId]);
+
+  const markerIconByBase = (baseId) => {
+    if (!result) return ICONS.base;
+    return markerIconsByBaseId[String(baseId)] || ICONS.base;
   };
 
-  const routeLine =
-    occurrencePos && activeRouteBase
-      ? [occurrencePos, [activeRouteBase.latitude, activeRouteBase.longitude]]
-      : null;
+  useEffect(() => {
+    const loadRouteGeometry = async () => {
+      if (!occurrencePos || !activeRouteBase) {
+        setRouteGeometry(null);
+        return;
+      }
+
+      try {
+        const route = await fetchRoutePath(
+          occurrencePos[0],
+          occurrencePos[1],
+          activeRouteBase.latitude,
+          activeRouteBase.longitude
+        );
+        setRouteGeometry(route?.coordinates || null);
+      } catch (error) {
+        setRouteGeometry([
+          occurrencePos,
+          [activeRouteBase.latitude, activeRouteBase.longitude],
+        ]);
+      }
+    };
+
+    loadRouteGeometry();
+  }, [occurrencePos, activeRouteBase]);
 
   const routingMode = result?.routing_mode || (result?.fallback_used ? 'FORMULA' : 'OSRM');
   const routingMeta = ROUTING_MODE_META[routingMode] || ROUTING_MODE_META.OSRM;
@@ -305,7 +370,7 @@ export default function App() {
             <Marker
               key={base.id}
               position={[base.latitude, base.longitude]}
-              icon={markerIconByRank(topThreeByBaseId[base.id])}
+              icon={markerIconByBase(base.id)}
             >
               <Popup>
                 <strong>{base.name}</strong>
@@ -329,9 +394,9 @@ export default function App() {
           )}
 
           {/* Route line */}
-          {routeLine && (
+          {routeGeometry && (
             <Polyline
-              positions={routeLine}
+              positions={routeGeometry}
               pathOptions={{
                 color: '#22d3ee',
                 weight: 5,

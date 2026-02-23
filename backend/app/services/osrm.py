@@ -76,6 +76,73 @@ async def get_route(
         return None
 
 
+async def get_route_with_geometry(
+    lat1: float, lng1: float,
+    lat2: float, lng2: float,
+) -> Optional[Tuple[float, float, list[list[float]]]]:
+    """
+    Consulta OSRM e retorna distância, duração e geometria da rota.
+
+    Returns:
+        (distance_km, duration_minutes, [[lat, lng], ...]) ou None se falhar.
+    """
+    url = (
+        f"{settings.osrm_url}/route/v1/driving/"
+        f"{lng1},{lat1};{lng2},{lat2}"
+        f"?overview=full&geometries=geojson&alternatives=false"
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+
+        data = response.json()
+
+        if data.get("code") != "Ok":
+            logger.warning(f"OSRM route geometry returned code={data.get('code')}")
+            return None
+
+        routes = data.get("routes")
+        if not routes or not isinstance(routes, list):
+            logger.warning("OSRM geometry payload missing routes list")
+            return None
+
+        route = routes[0]
+        if not isinstance(route, dict):
+            logger.warning("OSRM geometry payload has invalid first route entry")
+            return None
+
+        distance = route.get("distance")
+        duration = route.get("duration")
+        geometry = route.get("geometry") or {}
+        coordinates = geometry.get("coordinates")
+
+        if distance is None or duration is None or not coordinates:
+            logger.warning("OSRM geometry payload missing distance/duration/coordinates")
+            return None
+
+        lat_lng_coords = []
+        for coord in coordinates:
+            if not isinstance(coord, list) or len(coord) < 2:
+                continue
+            lng, lat = coord[0], coord[1]
+            lat_lng_coords.append([float(lat), float(lng)])
+
+        if len(lat_lng_coords) < 2:
+            logger.warning("OSRM geometry returned insufficient coordinates")
+            return None
+
+        distance_km = float(distance) / 1000.0
+        duration_min = float(duration) / 60.0
+
+        return (distance_km, duration_min, lat_lng_coords)
+
+    except Exception as e:
+        logger.warning(f"OSRM route geometry query failed: {e}")
+        return None
+
+
 async def get_table(
     sources: list[Tuple[float, float]],
     destinations: list[Tuple[float, float]],

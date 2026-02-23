@@ -20,8 +20,10 @@ from app.models.models import BaseUnit, Zone, TimeMatrix, Ambulance
 from app.schemas.dispatch import (
     DispatchRequest, DispatchResponse,
     HealthResponse, ErrorResponse, AmbulanceInfo,
+    RoutePathRequest, RoutePathResponse,
 )
 from app.services.dispatch import dispatch
+from app.services.osrm import get_route_with_geometry
 
 logger = logging.getLogger(__name__)
 
@@ -135,3 +137,38 @@ async def health(db: AsyncSession = Depends(get_db)):
             zones_count=0,
             matrix_entries=0,
         )
+
+
+@router.post(
+    "/route",
+    response_model=RoutePathResponse,
+    responses={
+        400: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+    summary="Rota real OSRM para visualização no mapa",
+)
+async def route_path_endpoint(request: RoutePathRequest):
+    result = await get_route_with_geometry(
+        request.origin_lat,
+        request.origin_lng,
+        request.dest_lat,
+        request.dest_lng,
+    )
+
+    if result is None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "Não foi possível calcular rota real para este trajeto",
+                "code": "NO_ROUTE",
+            },
+        )
+
+    distance_km, duration_minutes, coordinates = result
+    return RoutePathResponse(
+        distance_km=distance_km,
+        duration_minutes=duration_minutes,
+        coordinates=coordinates,
+    )

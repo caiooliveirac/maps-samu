@@ -50,6 +50,21 @@ class DispatchRequest(BaseModel):
         }
 
 
+class RoutePathRequest(BaseModel):
+    """Entrada para cálculo de rota real no mapa."""
+    origin_lat: float = Field(..., ge=-13.1, le=-12.7)
+    origin_lng: float = Field(..., ge=-38.6, le=-38.2)
+    dest_lat: float = Field(..., ge=-13.1, le=-12.7)
+    dest_lng: float = Field(..., ge=-38.6, le=-38.2)
+
+
+class RoutePathResponse(BaseModel):
+    """Rota em coordenadas decodificadas para desenhar no mapa."""
+    distance_km: float
+    duration_minutes: float
+    coordinates: list[list[float]]
+
+
 # ────────────────────────────────────────────
 # Response
 # ────────────────────────────────────────────

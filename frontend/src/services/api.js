@@ -91,3 +91,18 @@ export async function fetchBases() {
 export async function healthCheck() {
   return request('/health');
 }
+
+/**
+ * Rota real por ruas para desenhar no mapa (OSRM via backend).
+ */
+export async function fetchRoutePath(originLat, originLng, destLat, destLng) {
+  return request('/route', {
+    method: 'POST',
+    body: JSON.stringify({
+      origin_lat: originLat,
+      origin_lng: originLng,
+      dest_lat: destLat,
+      dest_lng: destLng,
+    }),
+  });
+}

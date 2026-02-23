@@ -321,17 +321,13 @@ body {
 .rank-2 .time-estimate { color: var(--color-rank-2); }
 .rank-3 .time-estimate { color: var(--color-rank-3); }
 
-.time-estimate.eta-fast {
-  color: #38bdf8;
-}
-
-.time-estimate.eta-medium {
-  color: #facc15;
-}
-
-.time-estimate.eta-slow {
-  color: #f87171;
-}
+.time-estimate.eta-band-1 { color: #38bdf8; }
+.time-estimate.eta-band-2 { color: #06b6d4; }
+.time-estimate.eta-band-3 { color: #22c55e; }
+.time-estimate.eta-band-4 { color: #eab308; }
+.time-estimate.eta-band-5 { color: #f59e0b; }
+.time-estimate.eta-band-6 { color: #f97316; }
+.time-estimate.eta-band-7 { color: #ef4444; }
 
 .time-unit {
   font-size: 12px;
