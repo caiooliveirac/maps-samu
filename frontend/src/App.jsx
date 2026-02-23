@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   MapContainer,
   TileLayer,
@@ -27,9 +27,22 @@ const createIcon = (color, size = 28) =>
     iconAnchor: [size / 2, size / 2],
   });
 
+const createRankIcon = (fill, stroke, label, size = 30) =>
+  L.divIcon({
+    className: '',
+    html: `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="9" fill="${fill}" opacity="0.92" stroke="${stroke}" stroke-width="2.2"/>
+      <text x="12" y="16" text-anchor="middle" fill="#fff" font-size="10" font-weight="700">${label}</text>
+    </svg>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+
 const ICONS = {
   base: createIcon('#3b82f6', 24),
   baseTop: createIcon('#22c55e', 32),
+  baseRank2: createRankIcon('#84cc16', '#bef264', '2', 28),
+  baseRank3: createRankIcon('#eab308', '#facc15', '3', 27),
   occurrence: L.divIcon({
     className: '',
     html: `<svg width="36" height="36" viewBox="0 0 24 24" fill="none">
@@ -58,6 +71,18 @@ const ROUTING_MODE_META = {
   FORMULA: { icon: '🔴', label: 'Fallback fórmula' },
 };
 
+const haversineDistanceKm = (lat1, lng1, lat2, lng2) => {
+  const toRad = (value) => (value * Math.PI) / 180;
+  const earthRadiusKm = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return earthRadiusKm * c;
+};
+
 // ── Map click handler component ──
 function MapClickHandler({ onMapClick }) {
   useMapEvents({
@@ -80,8 +105,11 @@ function FlyTo({ position }) {
 }
 
 // ── Result Card ──
-function ResultCard({ base, isTop, onClick }) {
+function ResultCard({ base, isTop, onClick, occurrencePos }) {
   const rankClass = base.rank <= 3 ? `rank-${base.rank}` : '';
+  const distanceKm = occurrencePos
+    ? haversineDistanceKm(occurrencePos[0], occurrencePos[1], base.latitude, base.longitude)
+    : null;
 
   return (
     <div
@@ -98,9 +126,14 @@ function ResultCard({ base, isTop, onClick }) {
             <div className="base-neighborhood">{base.neighborhood}</div>
           </div>
         </div>
-        <div className="time-estimate">
-          {base.estimated_minutes.toFixed(0)}
-          <span className="time-unit">min</span>
+        <div>
+          <div className="time-estimate">
+            {base.estimated_minutes.toFixed(0)}
+            <span className="time-unit">min</span>
+          </div>
+          {distanceKm !== null && (
+            <div className="distance-estimate">≈ {distanceKm.toFixed(1)} km</div>
+          )}
         </div>
       </div>
 
@@ -217,6 +250,21 @@ export default function App() {
 
   // Line from occurrence to top base
   const topBase = result?.bases_ranked?.[0];
+  const topThreeByBaseId = useMemo(() => {
+    const map = {};
+    (result?.bases_ranked || []).slice(0, 3).forEach((base) => {
+      map[base.base_id] = base.rank;
+    });
+    return map;
+  }, [result]);
+
+  const markerIconByRank = (rank) => {
+    if (rank === 1) return ICONS.baseTop;
+    if (rank === 2) return ICONS.baseRank2;
+    if (rank === 3) return ICONS.baseRank3;
+    return ICONS.base;
+  };
+
   const routeLine =
     occurrencePos && topBase
       ? [occurrencePos, [topBase.latitude, topBase.longitude]]
@@ -248,11 +296,7 @@ export default function App() {
             <Marker
               key={base.id}
               position={[base.latitude, base.longitude]}
-              icon={
-                topBase && topBase.base_id === base.id
-                  ? ICONS.baseTop
-                  : ICONS.base
-              }
+              icon={markerIconByRank(topThreeByBaseId[base.id])}
             >
               <Popup>
                 <strong>{base.name}</strong>
@@ -298,6 +342,16 @@ export default function App() {
         {coordMode && (
           <div className="map-click-indicator coord-mode-indicator">
             📌 MODO CAPTURA — Clique no mapa para capturar coordenadas
+          </div>
+        )}
+
+        {loading && !coordMode && (
+          <div className="map-loading-overlay" aria-live="polite">
+            <div className="map-loading-card">
+              <div className="map-loading-title">Calculando melhor despacho...</div>
+              <div className="map-skeleton-line" />
+              <div className="map-skeleton-line short" />
+            </div>
           </div>
         )}
       </div>
@@ -408,10 +462,22 @@ export default function App() {
         <div className="results-section">
           {/* Loading */}
           {loading && (
-            <div className="state-message">
-              <div className="spinner" />
-              <div className="state-title">Calculando rotas...</div>
-              <div className="state-desc">Buscando base mais próxima</div>
+            <div className="results-skeleton" aria-live="polite">
+              <div className="skeleton-card">
+                <div className="skeleton-line w-40" />
+                <div className="skeleton-line w-60" />
+                <div className="skeleton-line w-50" />
+              </div>
+              <div className="skeleton-card">
+                <div className="skeleton-line w-35" />
+                <div className="skeleton-line w-55" />
+                <div className="skeleton-line w-45" />
+              </div>
+              <div className="skeleton-card">
+                <div className="skeleton-line w-30" />
+                <div className="skeleton-line w-50" />
+                <div className="skeleton-line w-40" />
+              </div>
             </div>
           )}
 
@@ -463,6 +529,7 @@ export default function App() {
               base={base}
               isTop={base.rank === 1}
               onClick={handleBaseClick}
+              occurrencePos={occurrencePos}
             />
           ))}
         </div>
