@@ -85,7 +85,12 @@ class BaseRanked(BaseModel):
     neighborhood: str
     latitude: float
     longitude: float
+    distance_km: float = Field(description="Distância estimada/real em quilômetros")
     estimated_minutes: float = Field(description="Tempo estimado em minutos")
+    route_geometry: Optional[list[list[float]]] = Field(
+        None,
+        description="Rota em [lat, lng] para desenhar no mapa"
+    )
     ambulances: list[AmbulanceInfo]
     has_available: bool = Field(description="Tem ambulância disponível?")
 

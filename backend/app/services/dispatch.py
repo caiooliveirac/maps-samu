@@ -31,9 +31,9 @@ from app.schemas.dispatch import (
     BaseRanked, AmbulanceInfo, ErrorResponse,
 )
 from app.services.distance import (
-    find_nearest_zone, estimate_minutes,
+    find_nearest_zone, estimate_minutes, estimate_road_distance_km,
 )
-from app.services.osrm import get_route as osrm_get_route
+from app.services.osrm import get_route_with_geometry as osrm_get_route_with_geometry
 from app.services.osrm import is_healthy as osrm_is_healthy
 from app.services.geocoding import geocode_address
 from app.services.time_period import get_current_time_period
@@ -137,6 +137,12 @@ async def dispatch(
 
     ranked: list[dict] = []
     for base in candidate_bases:
+        baseline_distance_km = estimate_road_distance_km(
+            lat,
+            lng,
+            base.latitude,
+            base.longitude,
+        )
         minutes = estimate_minutes(
             lat,
             lng,
@@ -144,7 +150,15 @@ async def dispatch(
             base.longitude,
             time_period_str,
         )
-        ranked.append({"base": base, "minutes": minutes})
+        ranked.append({
+            "base": base,
+            "minutes": minutes,
+            "distance_km": round(max(baseline_distance_km, 0.1), 2),
+            "route_geometry": [
+                [base.latitude, base.longitude],
+                [lat, lng],
+            ],
+        })
 
     ranked.sort(key=lambda x: x["minutes"])
 
@@ -159,10 +173,10 @@ async def dispatch(
         osrm_available = False
     for item in ranked[:10]:
         base = item["base"]
-        origin_lat = _round_coord(lat)
-        origin_lng = _round_coord(lng)
-        dest_lat = _round_coord(base.latitude)
-        dest_lng = _round_coord(base.longitude)
+        origin_lat = _round_coord(base.latitude)
+        origin_lng = _round_coord(base.longitude)
+        dest_lat = _round_coord(lat)
+        dest_lng = _round_coord(lng)
 
         # 1) Cache no PostgreSQL
         cache_result = await db.execute(
@@ -175,26 +189,23 @@ async def dispatch(
         )
         cached = cache_result.scalar_one_or_none()
 
-        if cached:
-            item["minutes"] = round(max(cached.duration_minutes, 2.0), 1)
-            osrm_cache_count += 1
-            continue
-
         # 2) OSRM local com timeout explícito (configurável)
         if osrm_available:
             try:
-                osrm_result = await osrm_get_route(
-                    lat,
-                    lng,
+                osrm_result = await osrm_get_route_with_geometry(
                     base.latitude,
                     base.longitude,
+                    lat,
+                    lng,
                 )
             except Exception as osrm_err:
                 logger.warning(f"Falha inesperada no cliente OSRM: {osrm_err}")
                 osrm_result = None
             if osrm_result:
-                distance_km, osrm_minutes = osrm_result
+                distance_km, osrm_minutes, route_geometry = osrm_result
                 item["minutes"] = round(max(osrm_minutes, 2.0), 1)
+                item["distance_km"] = round(max(distance_km, 0.1), 2)
+                item["route_geometry"] = route_geometry
                 osrm_refined_count += 1
                 try:
                     db.add(
@@ -212,7 +223,14 @@ async def dispatch(
                     logger.warning(f"Falha ao gravar cache de rota: {cache_err}")
                 continue
 
-        # 3) Se erro/timeout no OSRM, mantém o valor da matriz ajustada
+        # 3) Se OSRM falhar, usa cache (distância/tempo OSRM já conhecido)
+        if cached:
+            item["minutes"] = round(max(cached.duration_minutes, 2.0), 1)
+            item["distance_km"] = round(max(cached.distance_km, 0.1), 2)
+            osrm_cache_count += 1
+            continue
+
+        # 4) Se erro/timeout no OSRM e sem cache, mantém o valor de fallback
         fallback_used = True
         fallback_formula_count += 1
 
@@ -251,7 +269,9 @@ async def dispatch(
             neighborhood=base.neighborhood,
             latitude=base.latitude,
             longitude=base.longitude,
+            distance_km=item["distance_km"],
             estimated_minutes=item["minutes"],
+            route_geometry=item["route_geometry"],
             ambulances=ambulances,
             has_available=has_available,
         ))

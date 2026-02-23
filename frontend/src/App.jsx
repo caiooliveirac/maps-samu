@@ -13,7 +13,6 @@ import {
   dispatchByCoords,
   dispatchByAddress,
   fetchBases,
-  fetchRoutePath,
 } from './services/api';
 
 // ── Map center: Salvador ──
@@ -105,18 +104,6 @@ const ROUTING_MODE_META = {
   FORMULA: { icon: '🔴', label: 'Fallback fórmula' },
 };
 
-const haversineDistanceKm = (lat1, lng1, lat2, lng2) => {
-  const toRad = (value) => (value * Math.PI) / 180;
-  const earthRadiusKm = 6371;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return earthRadiusKm * c;
-};
-
 // ── Map click handler component ──
 function MapClickHandler({ onMapClick }) {
   useMapEvents({
@@ -139,13 +126,11 @@ function FlyTo({ position }) {
 }
 
 // ── Result Card ──
-function ResultCard({ base, isTop, isSelected, onClick, occurrencePos }) {
+function ResultCard({ base, isTop, isSelected, onClick }) {
   const rankClass = base.rank <= 3 ? `rank-${base.rank}` : '';
   const etaClass = etaBandFromMinutes(base.estimated_minutes);
   const availableCount = base.ambulances.filter((amb) => amb.status === 'AVAILABLE').length;
-  const distanceKm = occurrencePos
-    ? haversineDistanceKm(occurrencePos[0], occurrencePos[1], base.latitude, base.longitude)
-    : null;
+  const distanceKm = typeof base.distance_km === 'number' ? base.distance_km : null;
 
   return (
     <div
@@ -340,52 +325,22 @@ export default function App() {
   };
 
   useEffect(() => {
-    let cancelled = false;
+    if (!occurrencePos || routeCandidateBases.length === 0) {
+      setRouteGeometries({});
+      return;
+    }
 
-    const loadRouteGeometries = async () => {
-      if (!occurrencePos || routeCandidateBases.length === 0) {
-        setRouteGeometries({});
-        return;
-      }
+    const entries = routeCandidateBases.map((base) => (
+      [
+        String(base.base_id),
+        {
+          coordinates: base.route_geometry || [[base.latitude, base.longitude], occurrencePos],
+          fallback: !base.route_geometry,
+        },
+      ]
+    ));
 
-      const entries = await Promise.all(
-        routeCandidateBases.map(async (base) => {
-          try {
-            const route = await fetchRoutePath(
-              base.latitude,
-              base.longitude,
-              occurrencePos[0],
-              occurrencePos[1]
-            );
-            return [
-              String(base.base_id),
-              {
-                coordinates: route?.coordinates || [[base.latitude, base.longitude], occurrencePos],
-                fallback: false,
-              },
-            ];
-          } catch (error) {
-            return [
-              String(base.base_id),
-              {
-                coordinates: [[base.latitude, base.longitude], occurrencePos],
-                fallback: true,
-              },
-            ];
-          }
-        })
-      );
-
-      if (!cancelled) {
-        setRouteGeometries(Object.fromEntries(entries));
-      }
-    };
-
-    loadRouteGeometries();
-
-    return () => {
-      cancelled = true;
-    };
+    setRouteGeometries(Object.fromEntries(entries));
   }, [occurrencePos, routeCandidateBases]);
 
   const lineOpacityByFocus = (rank, selectedRank) => {
@@ -703,7 +658,6 @@ export default function App() {
               isTop={base.rank === 1}
               isSelected={base.base_id === activeRouteBaseId}
               onClick={handleBaseClick}
-              occurrencePos={occurrencePos}
             />
           ))}
         </div>
