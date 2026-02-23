@@ -1,0 +1,67 @@
+version: "3.9"
+
+services:
+  # ──────────────────────────────────────────
+  # NGINX — Reverse Proxy & Static Files
+  # ──────────────────────────────────────────
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - samu-net
+
+  # ──────────────────────────────────────────
+  # BACKEND — FastAPI
+  # ──────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - samu-net
+
+  # ──────────────────────────────────────────
+  # DATABASE — PostgreSQL + PostGIS
+  # ──────────────────────────────────────────
+  db:
+    build:
+      context: ./db
+      dockerfile: Dockerfile
+    env_file: .env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - samu-net
+
+volumes:
+  pgdata:
+    driver: local
+
+networks:
+  samu-net:
+    driver: bridge
