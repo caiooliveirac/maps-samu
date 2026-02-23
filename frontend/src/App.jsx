@@ -327,16 +327,16 @@ export default function App() {
 
       try {
         const route = await fetchRoutePath(
-          occurrencePos[0],
-          occurrencePos[1],
           activeRouteBase.latitude,
-          activeRouteBase.longitude
+          activeRouteBase.longitude,
+          occurrencePos[0],
+          occurrencePos[1]
         );
         setRouteGeometry(route?.coordinates || null);
       } catch (error) {
         setRouteGeometry([
-          occurrencePos,
           [activeRouteBase.latitude, activeRouteBase.longitude],
+          occurrencePos,
         ]);
       }
     };
