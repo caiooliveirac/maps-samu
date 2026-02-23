@@ -75,8 +75,6 @@ const ETA_BAND_COLORS = {
   'eta-band-7': '#ef4444',
 };
 
-const ROUTE_PREVIEW_COUNT = 5;
-
 const ICONS = {
   base: createMedicalBaseIcon(24),
   occurrence: L.divIcon({
@@ -305,14 +303,15 @@ export default function App() {
 
   // Linha de rota: base selecionada no card (ou top 1 por padrão)
   const topBase = result?.bases_ranked?.[0];
-  const topPreviewBases = useMemo(
-    () => (result?.bases_ranked || []).slice(0, ROUTE_PREVIEW_COUNT),
+  const routeCandidateBases = useMemo(
+    () => (result?.bases_ranked || []),
     [result]
   );
   const activeRouteBase =
     (result?.bases_ranked || []).find((base) => base.base_id === selectedBase)
     || topBase;
   const activeRouteBaseId = activeRouteBase?.base_id || null;
+  const activeRouteRank = activeRouteBase?.rank || null;
   const rankingByBaseId = useMemo(() => {
     const map = {};
     (result?.bases_ranked || []).forEach((base) => {
@@ -344,13 +343,13 @@ export default function App() {
     let cancelled = false;
 
     const loadRouteGeometries = async () => {
-      if (!occurrencePos || topPreviewBases.length === 0) {
+      if (!occurrencePos || routeCandidateBases.length === 0) {
         setRouteGeometries({});
         return;
       }
 
       const entries = await Promise.all(
-        topPreviewBases.map(async (base) => {
+        routeCandidateBases.map(async (base) => {
           try {
             const route = await fetchRoutePath(
               base.latitude,
@@ -387,14 +386,25 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [occurrencePos, topPreviewBases]);
+  }, [occurrencePos, routeCandidateBases]);
 
-  const lineOpacityByRank = (rank) => {
-    if (rank === 1) return 0.45;
-    if (rank === 2) return 0.3;
-    if (rank === 3) return 0.22;
-    if (rank === 4) return 0.16;
-    return 0.12;
+  const lineOpacityByFocus = (rank, selectedRank) => {
+    if (!selectedRank) return rank <= 3 ? 0.35 : 0.12;
+
+    const distanceFromSelected = Math.abs(rank - selectedRank);
+    if (distanceFromSelected === 0) return 0.97;
+    if (distanceFromSelected === 1) return 0.56;
+    if (distanceFromSelected === 2) return 0.34;
+    return 0.1;
+  };
+
+  const lineWeightByFocus = (rank, selectedRank) => {
+    if (!selectedRank) return rank === 1 ? 5 : 3;
+
+    const distanceFromSelected = Math.abs(rank - selectedRank);
+    if (distanceFromSelected === 0) return 6;
+    if (distanceFromSelected <= 2) return 4;
+    return 2;
   };
 
   const firstAvailableBase = (result?.bases_ranked || []).find((base) => base.has_available);
@@ -450,8 +460,8 @@ export default function App() {
             </Marker>
           )}
 
-          {/* Preview routes: top opções com opacidades distintas */}
-          {topPreviewBases
+          {/* All ranked routes: cor por posição/ETA e opacidade por foco de seleção */}
+          {routeCandidateBases
             .filter((base) => base.base_id !== activeRouteBaseId)
             .map((base) => {
               const route = routeGeometries[String(base.base_id)]?.coordinates;
@@ -462,8 +472,8 @@ export default function App() {
                   positions={route}
                   pathOptions={{
                     color: ETA_BAND_COLORS[etaBandFromMinutes(base.estimated_minutes)] || '#22d3ee',
-                    weight: 3,
-                    opacity: lineOpacityByRank(base.rank),
+                    weight: lineWeightByFocus(base.rank, activeRouteRank),
+                    opacity: lineOpacityByFocus(base.rank, activeRouteRank),
                   }}
                 />
               );
@@ -475,9 +485,9 @@ export default function App() {
               positions={routeGeometries[String(activeRouteBaseId)].coordinates}
               pathOptions={{
                 color: ETA_BAND_COLORS[etaBandFromMinutes(activeRouteBase.estimated_minutes)] || '#22d3ee',
-                weight: 6,
+                weight: lineWeightByFocus(activeRouteBase.rank, activeRouteRank),
                 dashArray: '12 10',
-                opacity: 0.95,
+                opacity: lineOpacityByFocus(activeRouteBase.rank, activeRouteRank),
               }}
             />
           )}
