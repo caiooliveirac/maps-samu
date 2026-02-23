@@ -46,13 +46,28 @@ async def get_route(
 
         data = response.json()
 
-        if data.get("code") != "Ok" or not data.get("routes"):
-            logger.warning(f"OSRM returned non-Ok: {data.get('code')}")
+        if data.get("code") != "Ok":
+            logger.warning(f"OSRM route returned code={data.get('code')}")
             return None
 
-        route = data["routes"][0]
-        distance_km = route["distance"] / 1000.0
-        duration_min = route["duration"] / 60.0
+        routes = data.get("routes")
+        if not routes or not isinstance(routes, list):
+            logger.warning("OSRM route payload missing routes list")
+            return None
+
+        route = routes[0]
+        if not isinstance(route, dict):
+            logger.warning("OSRM route payload has invalid first route entry")
+            return None
+
+        distance = route.get("distance")
+        duration = route.get("duration")
+        if distance is None or duration is None:
+            logger.warning("OSRM route payload missing distance/duration")
+            return None
+
+        distance_km = float(distance) / 1000.0
+        duration_min = float(duration) / 60.0
 
         return (distance_km, duration_min)
 

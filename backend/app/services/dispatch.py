@@ -152,7 +152,11 @@ async def dispatch(
     osrm_refined_count = 0
     osrm_cache_count = 0
     fallback_formula_count = 0
-    osrm_available = await osrm_is_healthy()
+    try:
+        osrm_available = await osrm_is_healthy()
+    except Exception as health_err:
+        logger.warning(f"Falha ao verificar saúde do OSRM: {health_err}")
+        osrm_available = False
     for item in ranked[:10]:
         base = item["base"]
         origin_lat = _round_coord(lat)
@@ -178,12 +182,16 @@ async def dispatch(
 
         # 2) OSRM local com timeout explícito (configurável)
         if osrm_available:
-            osrm_result = await osrm_get_route(
-                lat,
-                lng,
-                base.latitude,
-                base.longitude,
-            )
+            try:
+                osrm_result = await osrm_get_route(
+                    lat,
+                    lng,
+                    base.latitude,
+                    base.longitude,
+                )
+            except Exception as osrm_err:
+                logger.warning(f"Falha inesperada no cliente OSRM: {osrm_err}")
+                osrm_result = None
             if osrm_result:
                 distance_km, osrm_minutes = osrm_result
                 item["minutes"] = round(max(osrm_minutes, 2.0), 1)
