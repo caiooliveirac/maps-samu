@@ -19,6 +19,7 @@ class Settings(BaseSettings):
 
     # OSRM (routing engine)
     osrm_url: str = "http://osrm:5000"
+    osrm_timeout_seconds: float = 5.0
 
     # App
     log_level: str = "info"

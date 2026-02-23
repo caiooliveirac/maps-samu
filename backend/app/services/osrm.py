@@ -15,8 +15,11 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-# Timeout curto para evitar travamento da aplicação quando OSRM está lento/offline
-TIMEOUT = httpx.Timeout(2.0, connect=2.0)
+# Timeout configurável para consultas de rota/matriz no OSRM
+TIMEOUT = httpx.Timeout(
+    settings.osrm_timeout_seconds,
+    connect=min(settings.osrm_timeout_seconds, 3.0),
+)
 
 
 async def get_route(

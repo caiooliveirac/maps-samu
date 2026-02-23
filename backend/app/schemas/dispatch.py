@@ -86,6 +86,13 @@ class DispatchResponse(BaseModel):
         False,
         description="True se usou Haversine ao invés de matriz pré-computada"
     )
+    routing_mode: str = Field(
+        "OSRM",
+        description="OSRM | MIXED | FORMULA (fórmula fallback)"
+    )
+    osrm_refined_count: int = Field(0, ge=0)
+    osrm_cache_count: int = Field(0, ge=0)
+    fallback_formula_count: int = Field(0, ge=0)
     bases_ranked: list[BaseRanked]
     total_bases: int
     timestamp: str

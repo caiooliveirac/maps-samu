@@ -52,6 +52,12 @@ const PERIOD_LABELS = {
   WEEKEND: '🟡 Fim de Semana',
 };
 
+const ROUTING_MODE_META = {
+  OSRM: { icon: '🟢', label: 'OSRM' },
+  MIXED: { icon: '🟡', label: 'OSRM parcial' },
+  FORMULA: { icon: '🔴', label: 'Fallback fórmula' },
+};
+
 // ── Map click handler component ──
 function MapClickHandler({ onMapClick }) {
   useMapEvents({
@@ -216,6 +222,9 @@ export default function App() {
       ? [occurrencePos, [topBase.latitude, topBase.longitude]]
       : null;
 
+  const routingMode = result?.routing_mode || (result?.fallback_used ? 'FORMULA' : 'OSRM');
+  const routingMeta = ROUTING_MODE_META[routingMode] || ROUTING_MODE_META.OSRM;
+
   return (
     <div className="app-layout">
       {/* ── MAP ── */}
@@ -379,10 +388,19 @@ export default function App() {
           </div>
 
           {result && (
-            <span className={`time-period-badge ${result.time_period}`}>
-              <span className="period-dot" />
-              {PERIOD_LABELS[result.time_period] || result.time_period}
-            </span>
+            <div className="dispatch-status-row">
+              <span className={`time-period-badge ${result.time_period}`}>
+                <span className="period-dot" />
+                {PERIOD_LABELS[result.time_period] || result.time_period}
+              </span>
+              <span
+                className={`routing-badge ${routingMode}`}
+                title={`Cálculo: ${routingMeta.label} (OSRM direto: ${result.osrm_refined_count || 0}, cache: ${result.osrm_cache_count || 0}, fallback: ${result.fallback_formula_count || 0})`}
+              >
+                <span aria-hidden="true">{routingMeta.icon}</span>
+                {routingMeta.label}
+              </span>
+            </div>
           )}
         </div>
 

@@ -148,9 +148,12 @@ async def dispatch(
 
     ranked.sort(key=lambda x: x["minutes"])
 
-    # ── 7. Refino Top 3: cache PostgreSQL -> OSRM(2s) -> fallback imediato ──
+    # ── 7. Refino Top 10: cache PostgreSQL -> OSRM(timeout configurável) -> fallback imediato ──
+    osrm_refined_count = 0
+    osrm_cache_count = 0
+    fallback_formula_count = 0
     osrm_available = await osrm_is_healthy()
-    for item in ranked[:3]:
+    for item in ranked[:10]:
         base = item["base"]
         origin_lat = _round_coord(lat)
         origin_lng = _round_coord(lng)
@@ -170,9 +173,10 @@ async def dispatch(
 
         if cached:
             item["minutes"] = round(max(cached.duration_minutes, 2.0), 1)
+            osrm_cache_count += 1
             continue
 
-        # 2) OSRM local com timeout explícito (2.0s)
+        # 2) OSRM local com timeout explícito (configurável)
         if osrm_available:
             osrm_result = await osrm_get_route(
                 lat,
@@ -183,6 +187,7 @@ async def dispatch(
             if osrm_result:
                 distance_km, osrm_minutes = osrm_result
                 item["minutes"] = round(max(osrm_minutes, 2.0), 1)
+                osrm_refined_count += 1
                 try:
                     db.add(
                         RouteCache(
@@ -201,9 +206,17 @@ async def dispatch(
 
         # 3) Se erro/timeout no OSRM, mantém o valor da matriz ajustada
         fallback_used = True
+        fallback_formula_count += 1
 
     # Ordenar por tempo
     ranked.sort(key=lambda x: x["minutes"])
+
+    if fallback_formula_count == 0:
+        routing_mode = "OSRM"
+    elif osrm_refined_count > 0 or osrm_cache_count > 0:
+        routing_mode = "MIXED"
+    else:
+        routing_mode = "FORMULA"
 
     # ── 8. Montar resposta ───────────────────────────────
     bases_ranked = []
@@ -259,6 +272,10 @@ async def dispatch(
         time_period=time_period_str,
         zone_name=zone_name,
         fallback_used=fallback_used,
+        routing_mode=routing_mode,
+        osrm_refined_count=osrm_refined_count,
+        osrm_cache_count=osrm_cache_count,
+        fallback_formula_count=fallback_formula_count,
         bases_ranked=bases_ranked,
         total_bases=len(bases_ranked),
         timestamp=datetime.now(BRT).isoformat(),
