@@ -75,6 +75,8 @@ const ETA_BAND_COLORS = {
   'eta-band-7': '#ef4444',
 };
 
+const ROUTE_PREVIEW_COUNT = 5;
+
 const ICONS = {
   base: createMedicalBaseIcon(24),
   occurrence: L.divIcon({
@@ -139,16 +141,17 @@ function FlyTo({ position }) {
 }
 
 // ── Result Card ──
-function ResultCard({ base, isTop, onClick, occurrencePos }) {
+function ResultCard({ base, isTop, isSelected, onClick, occurrencePos }) {
   const rankClass = base.rank <= 3 ? `rank-${base.rank}` : '';
   const etaClass = etaBandFromMinutes(base.estimated_minutes);
+  const availableCount = base.ambulances.filter((amb) => amb.status === 'AVAILABLE').length;
   const distanceKm = occurrencePos
     ? haversineDistanceKm(occurrencePos[0], occurrencePos[1], base.latitude, base.longitude)
     : null;
 
   return (
     <div
-      className={`result-card ${rankClass}`}
+      className={`result-card ${rankClass} ${isSelected ? 'selected-route' : ''}`}
       onClick={() => onClick(base)}
     >
       <div className="result-card-header">
@@ -172,9 +175,23 @@ function ResultCard({ base, isTop, onClick, occurrencePos }) {
         </div>
       </div>
 
+      <div className="base-ops-line">
+        <span className={`availability-pill ${availableCount > 0 ? 'ok' : 'none'}`}>
+          {availableCount > 0 ? `Disponíveis: ${availableCount}/${base.ambulances.length}` : 'Sem USA disponível'}
+        </span>
+      </div>
+
       <div className="ambulance-list">
         {base.ambulances.map((amb) => (
-          <span key={amb.ambulance_id} className={`ambulance-tag ${amb.status}`}>
+          <span
+            key={amb.ambulance_id}
+            className={`ambulance-tag ${amb.status}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClick(base);
+            }}
+            title="Selecionar rota desta base"
+          >
             <span className={`status-dot ${amb.status}`} />
             {amb.ambulance_code} ({amb.ambulance_type})
           </span>
@@ -200,7 +217,7 @@ export default function App() {
   const [occurrencePos, setOccurrencePos] = useState(null);
   const [flyTarget, setFlyTarget] = useState(null);
   const [selectedBase, setSelectedBase] = useState(null);
-  const [routeGeometry, setRouteGeometry] = useState(null);
+  const [routeGeometries, setRouteGeometries] = useState({});
   const [coordMode, setCoordMode] = useState(false);
   const [capturedCoords, setCapturedCoords] = useState([]);
   const [copiedIndex, setCopiedIndex] = useState(null);
@@ -220,7 +237,7 @@ export default function App() {
       setError(null);
       setResult(null);
       setSelectedBase(null);
-      setRouteGeometry(null);
+      setRouteGeometries({});
 
       try {
         let data;
@@ -288,9 +305,14 @@ export default function App() {
 
   // Linha de rota: base selecionada no card (ou top 1 por padrão)
   const topBase = result?.bases_ranked?.[0];
+  const topPreviewBases = useMemo(
+    () => (result?.bases_ranked || []).slice(0, ROUTE_PREVIEW_COUNT),
+    [result]
+  );
   const activeRouteBase =
     (result?.bases_ranked || []).find((base) => base.base_id === selectedBase)
     || topBase;
+  const activeRouteBaseId = activeRouteBase?.base_id || null;
   const rankingByBaseId = useMemo(() => {
     const map = {};
     (result?.bases_ranked || []).forEach((base) => {
@@ -319,30 +341,65 @@ export default function App() {
   };
 
   useEffect(() => {
-    const loadRouteGeometry = async () => {
-      if (!occurrencePos || !activeRouteBase) {
-        setRouteGeometry(null);
+    let cancelled = false;
+
+    const loadRouteGeometries = async () => {
+      if (!occurrencePos || topPreviewBases.length === 0) {
+        setRouteGeometries({});
         return;
       }
 
-      try {
-        const route = await fetchRoutePath(
-          activeRouteBase.latitude,
-          activeRouteBase.longitude,
-          occurrencePos[0],
-          occurrencePos[1]
-        );
-        setRouteGeometry(route?.coordinates || null);
-      } catch (error) {
-        setRouteGeometry([
-          [activeRouteBase.latitude, activeRouteBase.longitude],
-          occurrencePos,
-        ]);
+      const entries = await Promise.all(
+        topPreviewBases.map(async (base) => {
+          try {
+            const route = await fetchRoutePath(
+              base.latitude,
+              base.longitude,
+              occurrencePos[0],
+              occurrencePos[1]
+            );
+            return [
+              String(base.base_id),
+              {
+                coordinates: route?.coordinates || [[base.latitude, base.longitude], occurrencePos],
+                fallback: false,
+              },
+            ];
+          } catch (error) {
+            return [
+              String(base.base_id),
+              {
+                coordinates: [[base.latitude, base.longitude], occurrencePos],
+                fallback: true,
+              },
+            ];
+          }
+        })
+      );
+
+      if (!cancelled) {
+        setRouteGeometries(Object.fromEntries(entries));
       }
     };
 
-    loadRouteGeometry();
-  }, [occurrencePos, activeRouteBase]);
+    loadRouteGeometries();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [occurrencePos, topPreviewBases]);
+
+  const lineOpacityByRank = (rank) => {
+    if (rank === 1) return 0.45;
+    if (rank === 2) return 0.3;
+    if (rank === 3) return 0.22;
+    if (rank === 4) return 0.16;
+    return 0.12;
+  };
+
+  const firstAvailableBase = (result?.bases_ranked || []).find((base) => base.has_available);
+  const noAvailableBases = Boolean(result?.bases_ranked?.length)
+    && result.bases_ranked.every((base) => !base.has_available);
 
   const routingMode = result?.routing_mode || (result?.fallback_used ? 'FORMULA' : 'OSRM');
   const routingMeta = ROUTING_MODE_META[routingMode] || ROUTING_MODE_META.OSRM;
@@ -393,15 +450,34 @@ export default function App() {
             </Marker>
           )}
 
-          {/* Route line */}
-          {routeGeometry && (
+          {/* Preview routes: top opções com opacidades distintas */}
+          {topPreviewBases
+            .filter((base) => base.base_id !== activeRouteBaseId)
+            .map((base) => {
+              const route = routeGeometries[String(base.base_id)]?.coordinates;
+              if (!route) return null;
+              return (
+                <Polyline
+                  key={`route-preview-${base.base_id}`}
+                  positions={route}
+                  pathOptions={{
+                    color: ETA_BAND_COLORS[etaBandFromMinutes(base.estimated_minutes)] || '#22d3ee',
+                    weight: 3,
+                    opacity: lineOpacityByRank(base.rank),
+                  }}
+                />
+              );
+            })}
+
+          {/* Highlight route: base selecionada no painel */}
+          {activeRouteBaseId && routeGeometries[String(activeRouteBaseId)]?.coordinates && (
             <Polyline
-              positions={routeGeometry}
+              positions={routeGeometries[String(activeRouteBaseId)].coordinates}
               pathOptions={{
-                color: '#22d3ee',
-                weight: 5,
-                dashArray: '10 10',
-                opacity: 0.9,
+                color: ETA_BAND_COLORS[etaBandFromMinutes(activeRouteBase.estimated_minutes)] || '#22d3ee',
+                weight: 6,
+                dashArray: '12 10',
+                opacity: 0.95,
               }}
             />
           )}
@@ -596,12 +672,26 @@ export default function App() {
             </div>
           )}
 
+          {noAvailableBases && (
+            <div className="ops-decision-note critical">
+              ⚠ Nenhuma USA disponível no momento. Priorize menor ETA e menor distância,
+              enquanto aciona reforço de outra área.
+            </div>
+          )}
+
+          {!noAvailableBases && topBase && !topBase.has_available && firstAvailableBase && (
+            <div className="ops-decision-note">
+              ℹ Melhor opção com disponibilidade agora: #{firstAvailableBase.rank} {firstAvailableBase.base_name}.
+            </div>
+          )}
+
           {/* Result cards */}
           {result?.bases_ranked?.map((base) => (
             <ResultCard
               key={base.base_id}
               base={base}
               isTop={base.rank === 1}
+              isSelected={base.base_id === activeRouteBaseId}
               onClick={handleBaseClick}
               occurrencePos={occurrencePos}
             />

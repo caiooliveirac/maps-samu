@@ -283,6 +283,11 @@ body {
   border-width: 2px;
 }
 
+.result-card.selected-route {
+  border-color: #22d3ee;
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.55), 0 0 18px rgba(34, 211, 238, 0.18);
+}
+
 .result-card-header {
   display: flex;
   align-items: center;
@@ -344,6 +349,33 @@ body {
   text-align: right;
 }
 
+.base-ops-line {
+  margin-top: 6px;
+}
+
+.availability-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  border: 1px solid var(--border-color);
+}
+
+.availability-pill.ok {
+  color: #86efac;
+  background: #113225;
+  border-color: #1f7a46;
+}
+
+.availability-pill.none {
+  color: #fca5a5;
+  background: #3b1818;
+  border-color: #7f1d1d;
+}
+
 .base-name {
   font-weight: 600;
   font-size: 14px;
@@ -372,6 +404,7 @@ body {
   font-size: 11px;
   font-family: var(--font-mono);
   font-weight: 600;
+  cursor: pointer;
 }
 
 .ambulance-tag.AVAILABLE {
@@ -453,6 +486,23 @@ body {
   margin-bottom: 12px;
   font-size: 12px;
   color: #fde68a;
+}
+
+.ops-decision-note {
+  background: #102a3b;
+  border: 1px solid #1d4f73;
+  border-radius: var(--border-radius);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: #93c5fd;
+  line-height: 1.4;
+}
+
+.ops-decision-note.critical {
+  background: #3b1818;
+  border-color: #7f1d1d;
+  color: #fecaca;
 }
 
 /* ── Loading spinner ── */
