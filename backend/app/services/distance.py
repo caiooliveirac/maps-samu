@@ -12,14 +12,14 @@ EARTH_RADIUS_KM = 6371.0
 
 # Velocidade média de ambulância em Salvador (km/h)
 # Conservadora para não subestimar tempo
-AVG_SPEED_NORMAL_KMH = 35.0
-AVG_SPEED_RUSH_KMH = 18.0
-AVG_SPEED_NIGHT_KMH = 50.0
-AVG_SPEED_WEEKEND_KMH = 40.0
+AVG_SPEED_NORMAL_KMH = 28.0
+AVG_SPEED_RUSH_KMH = 13.0
+AVG_SPEED_NIGHT_KMH = 34.0
+AVG_SPEED_WEEKEND_KMH = 22.0
 
 # Fator de correção rua vs linha reta (Manhattan factor)
 # Salvador tem topografia irregular — fator alto
-ROAD_FACTOR = 1.45
+ROAD_FACTOR = 1.75
 
 
 def haversine_km(

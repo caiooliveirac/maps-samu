@@ -21,18 +21,12 @@ services:
   # OSRM — Routing Engine (OpenStreetMap)
   # ──────────────────────────────────────────
   osrm:
-    container_name: maps-osrm
-    build:
-      context: ./osrm
-      dockerfile: Dockerfile
-    environment:
-      OSRM_DATA_FILE: ${OSRM_DATA_FILE:-/data/nordeste.osrm}
-      OSRM_ALGORITHM: ${OSRM_ALGORITHM:-mld}
-      OSRM_PORT: ${OSRM_PORT:-5000}
-      OSRM_MAX_TABLE_SIZE: ${OSRM_MAX_TABLE_SIZE:-500}
+    image: ghcr.io/project-osrm/osrm-backend:latest
+    command: osrm-routed --algorithm mld /data/salvador.osrm
     volumes:
-      - ./osrm-data:/data:ro
-    restart: "no"
+      - ./osrm-data:/data
+    ports:
+      - "5000:5000"
     networks:
       - samu-net
 

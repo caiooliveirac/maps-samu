@@ -33,3 +33,6 @@ logs/
 
 # Database
 pgdata/
+
+# OSRM processed/offline data (local only)
+osrm-data/

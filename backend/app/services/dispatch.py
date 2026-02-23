@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.models import (
-    BaseUnit, Ambulance, Zone, TimeMatrix, Occurrence,
+    BaseUnit, Ambulance, Zone, Occurrence,
     TimePeriod, AmbulanceStatus, RouteCache,
 )
 from app.schemas.dispatch import (
@@ -47,6 +47,10 @@ BRT = timezone(timedelta(hours=-3))
 
 def _round_coord(value: float) -> float:
     return round(value, 5)
+
+
+def _has_available_ambulance(base: BaseUnit) -> bool:
+    return any(amb.status == AmbulanceStatus.AVAILABLE for amb in base.ambulances)
 
 
 async def dispatch(
@@ -125,109 +129,78 @@ async def dispatch(
             code="NO_BASES",
         )
 
-    # ── 6. Calcular ranking ──────────────────────────────
+    # ── 6. Ranking base: Haversine ajustado (1.75) para bases com viatura disponível ──
+    available_bases = [b for b in bases if _has_available_ambulance(b)]
+    candidate_bases = available_bases if available_bases else bases
+    if not available_bases:
+        fallback_used = True
+
     ranked: list[dict] = []
-
-    if zone_id:
-        # Caminho feliz: usa matriz pré-computada
-        matrix_result = await db.execute(
-            select(TimeMatrix)
-            .where(
-                TimeMatrix.zone_id == zone_id,
-                TimeMatrix.time_period == time_period,
-            )
-            .order_by(TimeMatrix.estimated_minutes.asc())
+    for base in candidate_bases:
+        minutes = estimate_minutes(
+            lat,
+            lng,
+            base.latitude,
+            base.longitude,
+            time_period_str,
         )
-        matrix_rows = matrix_result.scalars().all()
+        ranked.append({"base": base, "minutes": minutes})
 
-        if matrix_rows:
-            # Monta ranking a partir da matriz
-            base_map = {b.id: b for b in bases}
-            for entry in matrix_rows:
-                base = base_map.get(entry.base_id)
-                if base and base.is_active:
-                    ranked.append({
-                        "base": base,
-                        "minutes": entry.estimated_minutes,
-                    })
-        else:
-            fallback_used = True
-    else:
-        fallback_used = True
+    ranked.sort(key=lambda x: x["minutes"])
 
-    # ── 7. Fallback: OSRM routing real → Haversine ─────
-    if fallback_used or not ranked:
-        logger.warning(
-            f"Usando fallback para ({lat}, {lng}), "
-            f"zone_id={zone_id}, period={time_period_str}"
-        )
-        fallback_used = True
-        ranked = []
+    # ── 7. Refino Top 3: cache PostgreSQL -> OSRM(2s) -> fallback imediato ──
+    osrm_available = await osrm_is_healthy()
+    for item in ranked[:3]:
+        base = item["base"]
+        origin_lat = _round_coord(lat)
+        origin_lng = _round_coord(lng)
+        dest_lat = _round_coord(base.latitude)
+        dest_lng = _round_coord(base.longitude)
 
-        # Multiplicadores por faixa horária (sobre tempo OSRM free-flow)
-        period_multipliers = {
-            "NORMAL": 1.0,
-            "MORNING_RUSH": 1.85,
-            "EVENING_RUSH": 1.85,
-            "NIGHT": 0.70,
-            "WEEKEND": 0.85,
-        }
-        multiplier = period_multipliers.get(time_period_str, 1.0)
-        osrm_available = await osrm_is_healthy()
-
-        for base in bases:
-            origin_lat = _round_coord(lat)
-            origin_lng = _round_coord(lng)
-            dest_lat = _round_coord(base.latitude)
-            dest_lng = _round_coord(base.longitude)
-
-            # 1) Cache no PostgreSQL
-            cache_result = await db.execute(
-                select(RouteCache).where(
-                    RouteCache.origin_lat == origin_lat,
-                    RouteCache.origin_lng == origin_lng,
-                    RouteCache.dest_lat == dest_lat,
-                    RouteCache.dest_lng == dest_lng,
-                )
+        # 1) Cache no PostgreSQL
+        cache_result = await db.execute(
+            select(RouteCache).where(
+                RouteCache.origin_lat == origin_lat,
+                RouteCache.origin_lng == origin_lng,
+                RouteCache.dest_lat == dest_lat,
+                RouteCache.dest_lng == dest_lng,
             )
-            cached = cache_result.scalar_one_or_none()
+        )
+        cached = cache_result.scalar_one_or_none()
 
-            if cached:
-                minutes = round(max(cached.duration_minutes * multiplier, 2.0), 1)
-            else:
-                # 2) OSRM com timeout curto
-                minutes = None
-                if osrm_available:
-                    osrm_result = await osrm_get_route(
-                        lat, lng,
-                        base.latitude, base.longitude,
+        if cached:
+            item["minutes"] = round(max(cached.duration_minutes, 2.0), 1)
+            continue
+
+        # 2) OSRM local com timeout explícito (2.0s)
+        if osrm_available:
+            osrm_result = await osrm_get_route(
+                lat,
+                lng,
+                base.latitude,
+                base.longitude,
+            )
+            if osrm_result:
+                distance_km, osrm_minutes = osrm_result
+                item["minutes"] = round(max(osrm_minutes, 2.0), 1)
+                try:
+                    db.add(
+                        RouteCache(
+                            origin_lat=origin_lat,
+                            origin_lng=origin_lng,
+                            dest_lat=dest_lat,
+                            dest_lng=dest_lng,
+                            distance_km=distance_km,
+                            duration_minutes=osrm_minutes,
+                        )
                     )
-                    if osrm_result:
-                        distance_km, osrm_minutes = osrm_result
-                        minutes = round(max(osrm_minutes * multiplier, 2.0), 1)
+                    await db.flush()
+                except Exception as cache_err:
+                    logger.warning(f"Falha ao gravar cache de rota: {cache_err}")
+                continue
 
-                        try:
-                            db.add(RouteCache(
-                                origin_lat=origin_lat,
-                                origin_lng=origin_lng,
-                                dest_lat=dest_lat,
-                                dest_lng=dest_lng,
-                                distance_km=distance_km,
-                                duration_minutes=osrm_minutes,
-                            ))
-                            await db.flush()
-                        except Exception as cache_err:
-                            logger.warning(f"Falha ao gravar cache de rota: {cache_err}")
-
-                # 3) Fallback imediato para Haversine
-                if minutes is None:
-                    minutes = estimate_minutes(
-                        lat, lng,
-                        base.latitude, base.longitude,
-                        time_period_str,
-                    )
-
-            ranked.append({"base": base, "minutes": minutes})
+        # 3) Se erro/timeout no OSRM, mantém o valor da matriz ajustada
+        fallback_used = True
 
     # Ordenar por tempo
     ranked.sort(key=lambda x: x["minutes"])
