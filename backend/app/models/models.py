@@ -162,3 +162,44 @@ class Occurrence(Base):
     recommended_base_id = Column(Integer, ForeignKey("bases.id"), nullable=False)
     fallback_used = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class RouteCache(Base):
+    """
+    Cache de rotas ponto-a-ponto para reduzir dependência do OSRM em runtime.
+
+    As coordenadas são armazenadas já arredondadas para reduzir cardinalidade.
+    A chave única evita duplicidade e permite reuso entre chamadas próximas.
+    """
+    __tablename__ = "route_cache"
+    __table_args__ = (
+        UniqueConstraint(
+            "origin_lat",
+            "origin_lng",
+            "dest_lat",
+            "dest_lng",
+            name="uq_route_cache_coords",
+        ),
+        Index(
+            "ix_route_cache_lookup",
+            "origin_lat",
+            "origin_lng",
+            "dest_lat",
+            "dest_lng",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    origin_lat = Column(Float, nullable=False)
+    origin_lng = Column(Float, nullable=False)
+    dest_lat = Column(Float, nullable=False)
+    dest_lng = Column(Float, nullable=False)
+    distance_km = Column(Float, nullable=False)
+    duration_minutes = Column(Float, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )

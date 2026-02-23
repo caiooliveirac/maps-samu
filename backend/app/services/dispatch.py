@@ -24,7 +24,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.models import (
     BaseUnit, Ambulance, Zone, TimeMatrix, Occurrence,
-    TimePeriod, AmbulanceStatus,
+    TimePeriod, AmbulanceStatus, RouteCache,
 )
 from app.schemas.dispatch import (
     DispatchRequest, DispatchResponse,
@@ -34,6 +34,7 @@ from app.services.distance import (
     find_nearest_zone, estimate_minutes,
 )
 from app.services.osrm import get_route as osrm_get_route
+from app.services.osrm import is_healthy as osrm_is_healthy
 from app.services.geocoding import geocode_address
 from app.services.time_period import get_current_time_period
 from app.config import get_settings
@@ -42,6 +43,10 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 BRT = timezone(timedelta(hours=-3))
+
+
+def _round_coord(value: float) -> float:
+    return round(value, 5)
 
 
 async def dispatch(
@@ -168,23 +173,60 @@ async def dispatch(
             "WEEKEND": 0.85,
         }
         multiplier = period_multipliers.get(time_period_str, 1.0)
+        osrm_available = await osrm_is_healthy()
 
         for base in bases:
-            # Tentar OSRM primeiro
-            osrm_result = await osrm_get_route(
-                lat, lng,
-                base.latitude, base.longitude,
-            )
-            if osrm_result:
-                _, osrm_minutes = osrm_result
-                minutes = round(max(osrm_minutes * multiplier, 2.0), 1)
-            else:
-                # Fallback final: Haversine
-                minutes = estimate_minutes(
-                    lat, lng,
-                    base.latitude, base.longitude,
-                    time_period_str,
+            origin_lat = _round_coord(lat)
+            origin_lng = _round_coord(lng)
+            dest_lat = _round_coord(base.latitude)
+            dest_lng = _round_coord(base.longitude)
+
+            # 1) Cache no PostgreSQL
+            cache_result = await db.execute(
+                select(RouteCache).where(
+                    RouteCache.origin_lat == origin_lat,
+                    RouteCache.origin_lng == origin_lng,
+                    RouteCache.dest_lat == dest_lat,
+                    RouteCache.dest_lng == dest_lng,
                 )
+            )
+            cached = cache_result.scalar_one_or_none()
+
+            if cached:
+                minutes = round(max(cached.duration_minutes * multiplier, 2.0), 1)
+            else:
+                # 2) OSRM com timeout curto
+                minutes = None
+                if osrm_available:
+                    osrm_result = await osrm_get_route(
+                        lat, lng,
+                        base.latitude, base.longitude,
+                    )
+                    if osrm_result:
+                        distance_km, osrm_minutes = osrm_result
+                        minutes = round(max(osrm_minutes * multiplier, 2.0), 1)
+
+                        try:
+                            db.add(RouteCache(
+                                origin_lat=origin_lat,
+                                origin_lng=origin_lng,
+                                dest_lat=dest_lat,
+                                dest_lng=dest_lng,
+                                distance_km=distance_km,
+                                duration_minutes=osrm_minutes,
+                            ))
+                            await db.flush()
+                        except Exception as cache_err:
+                            logger.warning(f"Falha ao gravar cache de rota: {cache_err}")
+
+                # 3) Fallback imediato para Haversine
+                if minutes is None:
+                    minutes = estimate_minutes(
+                        lat, lng,
+                        base.latitude, base.longitude,
+                        time_period_str,
+                    )
+
             ranked.append({"base": base, "minutes": minutes})
 
     # Ordenar por tempo

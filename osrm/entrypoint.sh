@@ -1,32 +1,24 @@
-#!/bin/bash
-set -e
+#!/bin/sh
+set -eu
 
-DATA_DIR="/data"
-OSRM_FILE="$DATA_DIR/salvador.osrm"
+DATA_FILE="${OSRM_DATA_FILE:-/data/nordeste.osrm}"
+ALGORITHM="${OSRM_ALGORITHM:-mld}"
+PORT="${OSRM_PORT:-5000}"
+MAX_TABLE_SIZE="${OSRM_MAX_TABLE_SIZE:-500}"
 
-# ── Process with OSRM if not already done ──
-if [ ! -f "${OSRM_FILE}.cell_metrics" ]; then
-    echo "============================================"
-    echo " Processing OSM data with OSRM..."
-    echo "============================================"
-
-    echo "[1/3] Extracting road network..."
-    osrm-extract -p /opt/car.lua "$DATA_DIR/salvador.osm.pbf"
-
-    echo "[2/3] Partitioning graph..."
-    osrm-partition "$OSRM_FILE"
-
-    echo "[3/3] Customizing weights..."
-    osrm-customize "$OSRM_FILE"
-
-    echo "Processing complete."
+if [ ! -f "$DATA_FILE" ]; then
+    echo "ERROR: arquivo OSRM não encontrado: $DATA_FILE"
+    echo "Monte os arquivos pré-processados em /data (ex: ./osrm-data:/data)."
+    echo "Conteúdo atual de /data:"
+    ls -la /data || true
+    exit 1
 fi
 
-echo "============================================"
-echo " Starting OSRM server on port 5000"
-echo "============================================"
+echo "Usando dataset pré-processado: $DATA_FILE"
+echo "Subindo osrm-routed (algorithm=$ALGORITHM, port=$PORT)"
+
 exec osrm-routed \
-    --algorithm mld \
-    --port 5000 \
-    --max-table-size 500 \
-    "$OSRM_FILE"
+    --algorithm "$ALGORITHM" \
+    --port "$PORT" \
+    --max-table-size "$MAX_TABLE_SIZE" \
+    "$DATA_FILE"

@@ -15,8 +15,8 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-# Timeout generoso (OSRM local é rápido, mas primeira query pode demorar)
-TIMEOUT = httpx.Timeout(15.0, connect=10.0)
+# Timeout curto para evitar travamento da aplicação quando OSRM está lento/offline
+TIMEOUT = httpx.Timeout(2.0, connect=2.0)
 
 
 async def get_route(

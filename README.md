@@ -17,6 +17,22 @@ cd maps-samu
 cp .env.example .env
 # Em produção: alterar POSTGRES_PASSWORD e CORS_ORIGINS
 
+# 2.1 (ARM recomendado) Colocar dataset OSRM pré-processado em ./osrm-data
+# Exemplo mínimo esperado:
+#   ./osrm-data/nordeste.osrm
+#   ./osrm-data/nordeste.osrm.cells
+#   ./osrm-data/nordeste.osrm.cell_metrics
+#   ./osrm-data/nordeste.osrm.datasource_names
+#   ./osrm-data/nordeste.osrm.ebg
+#   ./osrm-data/nordeste.osrm.geometry
+#   ./osrm-data/nordeste.osrm.icd
+#   ./osrm-data/nordeste.osrm.mldgr
+#   ./osrm-data/nordeste.osrm.names
+#   ./osrm-data/nordeste.osrm.properties
+#   ./osrm-data/nordeste.osrm.timestamp
+#   ./osrm-data/nordeste.osrm.turn_duration_penalties
+#   ./osrm-data/nordeste.osrm.turn_weight_penalties
+
 # 3. Subir todos os containers
 docker compose up --build -d
 
@@ -28,7 +44,9 @@ docker compose ps
 curl http://localhost/api/health
 ```
 
-> **ATENÇÃO — Primeiro build do OSRM:** O container OSRM faz download de ~500 MB de dados do Geofabrik (nordeste do Brasil), recorta para Salvador com osmium, e processa com osrm-extract/partition/customize. Isso leva **5-15 minutos** na primeira vez. Nas próximas vezes, o Docker cache e o volume `osrm-data` evitam reprocessamento.
+> **Estratégia ARM (Apple Silicon):** este projeto **não** processa mapa dentro do Dockerfile/entrypoint. O container OSRM só sobe `osrm-routed` lendo arquivos já prontos montados em `./osrm-data:/data`.
+>
+> Se os arquivos `.osrm*` não existirem, o OSRM ficará indisponível — e a aplicação continua funcionando com fallback para Haversine (sem travar).
 
 ---
 
@@ -120,9 +138,9 @@ maps-samu/
 │       └── styles/global.css   # Dark theme (CARTO dark tiles)
 │
 ├── osrm/
-│   ├── Dockerfile              # Multi-stage: Debian (download + osmium clip) → OSRM backend
-│   ├── entrypoint.sh           # osrm-extract → partition → customize → routed
-│   └── healthcheck.sh          # Bash /dev/tcp healthcheck (sem curl/wget)
+│   ├── Dockerfile              # Runtime OSRM (sem build/processamento de mapa)
+│   ├── entrypoint.sh           # Apenas valida dataset e executa osrm-routed
+│   └── healthcheck.sh          # (legado) utilitário opcional
 │
 └── db/
     ├── Dockerfile
@@ -258,20 +276,19 @@ As coordenadas foram capturadas diretamente nos tiles CARTO/OSM do mapa da aplic
 
 O container OSRM fornece tempos de percurso reais pelas ruas de Salvador usando dados OpenStreetMap.
 
-### Como funciona o build
+### Como funciona em produção (ARM-safe)
 
-1. **Download**: Geofabrik `nordeste-latest.osm.pbf` (~500 MB)
-2. **Clip**: `osmium extract --bbox=-38.62,-13.10,-38.28,-12.73` → extrai apenas Salvador (~30 MB)
-3. **Processamento OSRM**: `osrm-extract` → `osrm-partition` → `osrm-customize` (algoritmo MLD)
-4. **Serve**: `osrm-routed --algorithm mld --port 5000 --max-table-size 500`
+1. O dataset (`.osrm` + arquivos auxiliares `.osrm.*`) é preparado fora deste deploy
+  (ex: máquina x86_64 ou pipeline dedicado).
+2. Os arquivos são montados em volume bind: `./osrm-data:/data`.
+3. O entrypoint apenas valida `OSRM_DATA_FILE` e executa:
+  `osrm-routed --algorithm mld --port 5000 --max-table-size 500 <arquivo.osrm>`.
 
 ### Cuidados importantes
 
-- O **primeiro build demora** (download de 500 MB + processamento). Docker cache evita rebuild.
-- O volume `osrm-data` persiste os dados processados. `docker compose down` (sem `-v`) preserva.
-- `docker compose down -v` **apaga** o volume → próximo `up` reprocessa OSRM + refaz seed.
-- Se o Geofabrik estiver fora do ar, o build falhará. Alternativa: baixar manualmente o PBF para `osrm/` e ajustar o Dockerfile.
-- A bbox do clip cobre a região metropolitana de Salvador. Se precisar expandir, editar o `--bbox` em `osrm/Dockerfile`.
+- Em ARM, evitar processamento de mapa durante build/startup reduz loops, timeouts e travamentos.
+- Se o OSRM estiver fora, o backend continua respondendo usando matriz pré-computada e fallback Haversine.
+- Há cache de rotas no PostgreSQL (`route_cache`) para reduzir chamadas futuras ao OSRM.
 
 ### APIs OSRM usadas
 
